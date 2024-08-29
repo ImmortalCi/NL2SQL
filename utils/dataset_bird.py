@@ -1,4 +1,5 @@
 import os
+from sympy import false
 import torch
 from torch.utils.data import Dataset
 import pdb
@@ -10,6 +11,8 @@ class TokenizedDataset(Dataset):
         self.args = args
         self.training_args = training_args
         self.tokenizer = tokenizer
+        if args.seq2seq.model_type == 'DecoderOnly':
+            self.tokenizer.padding_side = "left"
         self.seq2seq_dataset = seq2seq_dataset
 
         self.conv_sep = " || "
@@ -71,6 +74,24 @@ class TokenizedDataset(Dataset):
         if self.args.model.use_description and self.args.model.concatenate_description:
             seq_in = "{} ; {}".format(raw_item["description"], seq_in)
 
+        if self.args.seq2seq.model_type == 'DecoderOnly' and not self.args.dataset.is_eval:
+             # find the length of seq_in(without the seq_out)
+            prompt_in_tokenized = self.tokenizer(
+                seq_in,
+                padding="do_not_pad",
+                truncation=True,
+                max_length=self.training_args.input_max_length,
+            )['input_ids']
+
+            # Remove the last token if it is an eos token
+            if prompt_in_tokenized[-1] == self.tokenizer.eos_token_id:
+                prompt_in_tokenized = prompt_in_tokenized[:-1]
+
+            # 需要将seq_in和seq_out进行拼接
+            seq_in = "{} {}".format(seq_in, raw_item["query"])
+
+
+
         tokenized_question_and_schemas = self.tokenizer(
             seq_in,
             padding="max_length",
@@ -89,9 +110,23 @@ class TokenizedDataset(Dataset):
             # We set the max_length of "seq_out" during training is the same with the one in inference.
         )
 
-        tokenized_inferred_input_ids = torch.LongTensor(tokenized_inferred.data["input_ids"])
-        # Here -100 will let the model not to compute the loss of the padding tokens.
-        tokenized_inferred_input_ids[tokenized_inferred_input_ids == self.tokenizer.pad_token_id] = -100
+        if not self.args.seq2seq.model_type == 'DecoderOnly':  # Encoder-Decoder中的设置
+            tokenized_inferred_input_ids = torch.LongTensor(tokenized_inferred.data["input_ids"])
+            # Here -100 will let the model not to compute the loss of the padding tokens.
+            tokenized_inferred_input_ids[tokenized_inferred_input_ids == self.tokenizer.pad_token_id] = -100
+
+        if self.args.seq2seq.model_type == 'DecoderOnly' and not self.args.dataset.is_eval:
+            tokenized_inferred_input_ids = tokenized_question_and_schemas.data["input_ids"].copy()  # 不加copy会改变原来的值
+
+
+            # 需要对label的输入部分进行mask
+            for i in range(len(prompt_in_tokenized)):
+                tokenized_inferred_input_ids[i] = -100   
+            if len(prompt_in_tokenized) > len(tokenized_question_and_schemas.data['input_ids']):
+                raise ValueError(
+                    f"Prompt is longer than the input, something went wrong. Prompt: {prompt_in_tokenized}, input:"
+                    f" {tokenized_question_and_schemas.data['input_ids']}"
+                )
 
         item = {
             'input_ids': torch.LongTensor(tokenized_question_and_schemas.data["input_ids"]),
@@ -122,6 +157,7 @@ class TokenizedDataset(Dataset):
             item['knowledge_input_ids'] = torch.LongTensor(tokenized_knowledge.data["input_ids"])
             item['knowledge_attention_mask'] = torch.LongTensor(tokenized_knowledge.data["attention_mask"])
         
+
         return item
 
     def __len__(self):

@@ -43,3 +43,7 @@ class WrappedSeq2SeqTrainingArguments(Seq2SeqTrainingArguments):
         default=None, metadata={
             "help": "The directory to load the model weights from."}
     )
+    is_decoder_only: bool = field(
+        default=False, metadata={
+            "help": "Whether the model is a decoder-only model."}
+    )

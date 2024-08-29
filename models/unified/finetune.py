@@ -13,22 +13,22 @@ class Model(PushToHubFriendlyModel):
         super().__init__()
         self.args = args
 
-        # # Load tokenizer and model.
-        # self.tokenizer = LlamaTokenizer.from_pretrained(args.bert.location, use_fast=False)
+        # Load tokenizer and model.
+        self.tokenizer = LlamaTokenizer.from_pretrained(args.bert.location, use_fast=False)
 
-        # #  add padding token to tokenizer
-        # if self.tokenizer.pad_token is None:
-        #     self.tokenizer.pad_token = self.tokenizer.eos_token
+        #  add padding token to tokenizer
+        if self.tokenizer.pad_token is None:
+            self.tokenizer.pad_token = self.tokenizer.eos_token
 
 
-        # self.pretrain_model = LlamaForCausalLM.from_pretrained(
-        #     args.bert.location,
-        #     torch_dtype=torch.bfloat16
-        # )
-        # self.config = self.pretrain_model.config
+        self.pretrain_model = LlamaForCausalLM.from_pretrained(
+            args.bert.location,
+            torch_dtype=torch.bfloat16
+        )
+        self.config = self.pretrain_model.config
 
-        self.tokenizer = AutoTokenizer.from_pretrained(args.bert.location, use_fast=False)
-        self.pretrain_model = AutoModelForSeq2SeqLM.from_pretrained(args.bert.location)
+        # self.tokenizer = AutoTokenizer.from_pretrained(args.bert.location, use_fast=False)
+        # self.pretrain_model = AutoModelForSeq2SeqLM.from_pretrained(args.bert.location)
 
         self.main_input_name = "input_ids"
 

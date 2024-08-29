@@ -69,6 +69,7 @@ class BIRD(datasets.GeneratorBasedBuilder):
             citation=_CITATION,
         )
 
+    # 定义好的路径信息
     def _split_generators(self, dl_manager):
         downloaded_filepath = '/opt/data/private/wtc_beifen/bird/data'
 

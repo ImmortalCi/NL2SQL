@@ -5,6 +5,7 @@ import time
 import pdb
 import json
 
+from sympy import false
 import torch
 import datasets
 import transformers
@@ -42,7 +43,6 @@ def main() -> None:
     # Get args
     parser = HfArgumentParser((WrappedSeq2SeqTrainingArguments,))
     training_args, = parser.parse_args_into_dataclasses()
-
     set_seed(training_args.seed)
     args = Configure.Get(training_args.cfg)
 
@@ -55,7 +55,7 @@ def main() -> None:
             os.path.dirname(args.bert.location.model_name_or_path))
         logger.info(f"Resolve model_name_or_path to {args.bert.location.model_name_or_path}")
 
-    if "wandb" in training_args.report_to and training_args.local_rank <= 0:
+    if training_args.report_to and training_args.local_rank <= 0:
         import wandb
 
         init_args = {}
@@ -107,9 +107,12 @@ def main() -> None:
             print('task_args.bert.location:', task_args.bert.location)
 
             # 这里的path传入的是一个python文件的路径./finetuning/tasks/bird.py，这个文件中定义了一个类，这个类继承自datasets.GeneratorBasedBuilder
+            # import pdb; pdb.set_trace()
             task_raw_datasets_split: datasets.DatasetDict = datasets.load_dataset(
                 path=task_args.dataset.loader_path,
-                cache_dir=task_args.dataset.data_store_path)
+                cache_dir=task_args.dataset.data_store_path,
+                trust_remote_code=True)
+            # task_args.seq2seq.constructor是seq2seq_construction.bird
             task_seq2seq_dataset_split: tuple = utils.tool.get_constructor(task_args.seq2seq.constructor)(task_args).\
                 to_seq2seq(task_raw_datasets_split, cache_root)
 
@@ -121,9 +124,9 @@ def main() -> None:
     # 'metrics.meta_tuning.evaluator'
     evaluator = utils.tool.get_evaluator(args.evaluate.tool)(args)
     model = utils.tool.get_model(args.model.name)(args)
-    import pdb; pdb.set_trace()
 
     model_tokenizer = model.tokenizer
+
 
     seq2seq_train_dataset, seq2seq_eval_dataset, seq2seq_test_dataset = None, None, None
     if len(seq2seq_dataset_split) == 2:
@@ -134,14 +137,19 @@ def main() -> None:
         raise ValueError("Other split not support yet.")
 
     # We wrap the "string" seq2seq data into "tokenized tensor".
+
+    # import pdb; pdb.set_trace()
     train_dataset = TokenizedDataset(args, training_args, model_tokenizer,
                                      seq2seq_train_dataset) if seq2seq_train_dataset else None
+    args.dataset.is_eval = True
     eval_dataset = TokenizedDataset(args, training_args, model_tokenizer,
                                     seq2seq_eval_dataset) if seq2seq_eval_dataset else None
+    args.dataset.is_eval = False
     # test_dataset = TokenizedDataset(args, training_args, model_tokenizer,
     #                                 seq2seq_test_dataset) if seq2seq_test_dataset else None
     
-
+    import pdb; pdb.set_trace()
+    
     # Initialize our Trainer
     early_stopping_callback = EarlyStoppingCallback(early_stopping_patience=args.seq2seq.patience if args.seq2seq.patience else 5)
     trainer = EvaluateFriendlySeq2SeqTrainer(
@@ -154,7 +162,7 @@ def main() -> None:
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
         eval_examples=seq2seq_eval_dataset,
-        wandb_run_dir=wandb.run.dir if "wandb" in training_args.report_to and training_args.local_rank <= 0 else None,
+        wandb_run_dir=wandb.run.dir if training_args.report_to and training_args.local_rank <= 0 else None,
         callbacks=[early_stopping_callback],
     )
     print('Trainer build successfully.')

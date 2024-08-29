@@ -136,9 +136,8 @@ class EvaluateFriendlySeq2SeqTrainer(transformers.trainer_seq2seq.Seq2SeqTrainer
         # memory metrics - must set up as early as possible
         self._memory_tracker.start()
 
-        import pdb; pdb.set_trace()
+        # import pdb; pdb.set_trace()
         eval_dataset = self.eval_dataset if eval_dataset is None else eval_dataset
-
         eval_dataloader = self.get_eval_dataloader(eval_dataset)
         eval_examples = self.eval_examples if eval_examples is None else eval_examples
         start_time = time.time()
@@ -275,8 +274,14 @@ class EvaluateFriendlySeq2SeqTrainer(transformers.trainer_seq2seq.Seq2SeqTrainer
         inputs = self._prepare_inputs(inputs)
 
         # XXX: adapt synced_gpus for fairscale as well
+        # gen_kwargs = {
+        #     "max_length": self._max_length if self._max_length is not None else self.model.config.max_length,
+        #     "num_beams": self._num_beams if self._num_beams is not None else self.model.config.num_beams,
+        #     "synced_gpus": True if is_deepspeed_zero3_enabled() else False,
+        #     "no_repeat_ngram_size": 0,  # FIXME: hard coding the no_repeat_ngram_size
+        # }
         gen_kwargs = {
-            "max_length": self._max_length if self._max_length is not None else self.model.config.max_length,
+            "max_new_tokens": self._max_length if self._max_length is not None else self.model.config.max_length,
             "num_beams": self._num_beams if self._num_beams is not None else self.model.config.num_beams,
             "synced_gpus": True if is_deepspeed_zero3_enabled() else False,
             "no_repeat_ngram_size": 0,  # FIXME: hard coding the no_repeat_ngram_size
@@ -295,21 +300,23 @@ class EvaluateFriendlySeq2SeqTrainer(transformers.trainer_seq2seq.Seq2SeqTrainer
         if "graph_idx" in inputs:
             gen_kwargs["graph_idx"] = inputs["graph_idx"]
 
+        # import pdb;pdb.set_trace()
+        
         generated_tokens = self.model.generate(
             inputs["input_ids"],
             attention_mask=inputs["attention_mask"],
             **gen_kwargs,
         )
         # in case the batch is shorter than max length, the output should be padded
-        if generated_tokens.shape[-1] < gen_kwargs["max_length"]:
+        if generated_tokens.shape[-1] < gen_kwargs["max_new_tokens"]:
             generated_tokens = self._pad_tensors_to_max_len(generated_tokens, gen_kwargs["max_length"])
 
         with torch.no_grad():
-            if self.use_cuda_amp:
-                with autocast():
-                    outputs = model(**inputs)
-            else:
-                outputs = model(**inputs)
+            # if self.use_cuda_amp:
+            #     with autocast():
+            #         outputs = model(**inputs)
+            # else:
+            outputs = model(**inputs)
             if has_labels:
                 if self.label_smoother is not None:
                     loss = self.label_smoother(outputs, inputs["labels"]).mean().detach()
@@ -322,8 +329,8 @@ class EvaluateFriendlySeq2SeqTrainer(transformers.trainer_seq2seq.Seq2SeqTrainer
             return (loss, None, None)
 
         labels = inputs["labels"]
-        if labels.shape[-1] < gen_kwargs["max_length"]:
-            labels = self._pad_tensors_to_max_len(labels, gen_kwargs["max_length"])
+        if labels.shape[-1] < gen_kwargs["max_new_tokens"]:
+            labels = self._pad_tensors_to_max_len(labels, gen_kwargs["max_new_tokens"])
 
         return (loss, generated_tokens, labels)
 
