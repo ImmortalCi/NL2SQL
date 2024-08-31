@@ -3,6 +3,7 @@ import json
 import time
 from typing import Any, Dict, List, Optional, Tuple, Union
 from typing import NamedTuple
+from unittest import result
 
 import datasets
 import numpy as np
@@ -161,6 +162,7 @@ class EvaluateFriendlySeq2SeqTrainer(transformers.trainer_seq2seq.Seq2SeqTrainer
             self.compute_metrics = compute_metrics
 
         if eval_examples is not None and eval_dataset is not None and self.compute_metrics is not None:
+            # import pdb; pdb.set_trace()
             eval_preds = self._post_process_function(
                 eval_examples,
                 output.predictions,
@@ -308,8 +310,13 @@ class EvaluateFriendlySeq2SeqTrainer(transformers.trainer_seq2seq.Seq2SeqTrainer
             **gen_kwargs,
         )
         # in case the batch is shorter than max length, the output should be padded
-        if generated_tokens.shape[-1] < gen_kwargs["max_new_tokens"]:
+
+        if generated_tokens.shape[-1] < gen_kwargs["max_new_tokens"] and not self.args.is_decoder_only:  # encoder-decoder下的设置
             generated_tokens = self._pad_tensors_to_max_len(generated_tokens, gen_kwargs["max_length"])
+
+        # generated_tokens去除input_ids的部分（主要是Decoder only）
+        if self.args.is_decoder_only:
+            generated_tokens = generated_tokens[:, inputs["input_ids"].shape[-1]:]
 
         with torch.no_grad():
             # if self.use_cuda_amp:
@@ -339,13 +346,23 @@ class EvaluateFriendlySeq2SeqTrainer(transformers.trainer_seq2seq.Seq2SeqTrainer
     ) -> EvalPrediction:
         assert isinstance(examples, Dataset)
 
-        predictions = self.tokenizer.batch_decode(predictions, skip_special_tokens=True)
+        # predictions = self.tokenizer.batch_decode(predictions, skip_special_tokens=True)
+        # 避免batch_decode的时候出现问题，逐个decode
+        results = []
+        bs = predictions.shape[0]
+        # import pdb; pdb.set_trace()
+        for i in range(bs):
+            try:
+                results.append(self.tokenizer.decode(predictions[i], skip_special_tokens=True))
+            except Exception as e:
+                print(f"Error in decoding prediction {i}: {e}")
+                results.append("error")
 
         # Save locally.
         if self.args.local_rank <= 0:
             with open(f"{self.args.output_dir}/predictions_{stage}.json", "w") as f:
                 json.dump(
-                    [dict(**{"prediction": predictions[idx]}, **examples[idx]) for idx in range(len(predictions))],
+                    [dict(**{"prediction": results[idx]}, **examples[idx]) for idx in range(len(results))],
                     f,
                     indent=4,
                 )
@@ -354,11 +371,11 @@ class EvaluateFriendlySeq2SeqTrainer(transformers.trainer_seq2seq.Seq2SeqTrainer
         if self.wandb_run_dir and self.args.local_rank <= 0:
             with open(f"{self.wandb_run_dir}/predictions_{stage}.json", "w") as f:
                 json.dump(
-                    [dict(**{"prediction": predictions[idx]}, **examples[idx]) for idx in range(len(predictions))],
+                    [dict(**{"prediction": results[idx]}, **examples[idx]) for idx in range(len(results))],
                     f,
                     indent=4,
                 )
-        return EvalPrediction(predictions=predictions, items=[examples[idx] for idx in range(len(predictions))])
+        return EvalPrediction(predictions=results, items=[examples[idx] for idx in range(len(results))])
 
     def _compute_metrics(self, eval_prediction: EvalPrediction, section) -> dict:
         # bird/finetuning/metrics/meta_tuning/evaluator.py

@@ -55,7 +55,8 @@ def main() -> None:
             os.path.dirname(args.bert.location.model_name_or_path))
         logger.info(f"Resolve model_name_or_path to {args.bert.location.model_name_or_path}")
 
-    if training_args.report_to and training_args.local_rank <= 0:
+    # debug 
+    if 'wandb' in training_args.report_to and training_args.local_rank <= 0:
         import wandb
 
         init_args = {}
@@ -67,7 +68,8 @@ def main() -> None:
             # entity=os.getenv("WANDB_ENTITY", 'sgtnew'),
             **init_args,
         )
-        wandb.config.update(training_args, allow_val_change=True)
+        # import pdb; pdb.set_trace()
+        # wandb.config.update(training_args, allow_val_change=True)  # TypeError: Object of type HfTrainerDeepSpeedConfig is not JSON serializable 暂时有BUG
 
     # Detect last checkpoint
     last_checkpoint = None
@@ -112,6 +114,11 @@ def main() -> None:
                 path=task_args.dataset.loader_path,
                 cache_dir=task_args.dataset.data_store_path,
                 trust_remote_code=True)
+            
+            # # debug 对eval_dataset进行切分
+            # tmp = task_raw_datasets_split['validation'][:20]
+            # task_raw_datasets_split['validation'] = datasets.Dataset.from_dict(tmp)
+
             # task_args.seq2seq.constructor是seq2seq_construction.bird
             task_seq2seq_dataset_split: tuple = utils.tool.get_constructor(task_args.seq2seq.constructor)(task_args).\
                 to_seq2seq(task_raw_datasets_split, cache_root)
@@ -148,7 +155,7 @@ def main() -> None:
     # test_dataset = TokenizedDataset(args, training_args, model_tokenizer,
     #                                 seq2seq_test_dataset) if seq2seq_test_dataset else None
     
-    import pdb; pdb.set_trace()
+    # import pdb; pdb.set_trace()
     
     # Initialize our Trainer
     early_stopping_callback = EarlyStoppingCallback(early_stopping_patience=args.seq2seq.patience if args.seq2seq.patience else 5)
@@ -162,7 +169,7 @@ def main() -> None:
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
         eval_examples=seq2seq_eval_dataset,
-        wandb_run_dir=wandb.run.dir if training_args.report_to and training_args.local_rank <= 0 else None,
+        wandb_run_dir=wandb.run.dir if 'wandb' in training_args.report_to and training_args.local_rank <= 0 else None,
         callbacks=[early_stopping_callback],
     )
     print('Trainer build successfully.')

@@ -109,6 +109,8 @@ class EvaluateTool(object):
         gold_results = pre_results
         
         # gold_results = self.sort_results(self.exec_result)  #仅仅测试准确性
+        # debug
+        gold_results = gold_results[:len(pred_results)]
         exec_accuracy = self.compute_execution_accuracy(gt_results=gold_results, predict_results=pred_results)
         exec_results = {'exec': exec_accuracy}
         return {**exec_results}
