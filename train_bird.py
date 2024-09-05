@@ -1,6 +1,8 @@
-
+import cProfile
+import pstats
 import logging
 import os
+os.environ["WANDB_MODE"]="offline"
 import time
 import pdb
 import json
@@ -8,7 +10,9 @@ import json
 from sympy import false
 import torch
 import datasets
+from peft import LoraConfig, TaskType, get_peft_model, PeftModel, PeftConfig, AutoPeftModelForCausalLM
 import transformers
+from transformers import LlamaTokenizer, LlamaForCausalLM
 from transformers import (
     HfArgumentParser,
     set_seed,
@@ -115,8 +119,8 @@ def main() -> None:
                 cache_dir=task_args.dataset.data_store_path,
                 trust_remote_code=True)
             
-            # # debug 对eval_dataset进行切分
-            # tmp = task_raw_datasets_split['validation'][:20]
+            # debug 对eval_dataset进行切分
+            # tmp = task_raw_datasets_split['validation'][:10]
             # task_raw_datasets_split['validation'] = datasets.Dataset.from_dict(tmp)
 
             # task_args.seq2seq.constructor是seq2seq_construction.bird
@@ -130,9 +134,37 @@ def main() -> None:
 
     # 'metrics.meta_tuning.evaluator'
     evaluator = utils.tool.get_evaluator(args.evaluate.tool)(args)
-    model = utils.tool.get_model(args.model.name)(args)
+    if not (training_args.use_lora and not training_args.do_train):  # 非lora评测
+        model = utils.tool.get_model(args.model.name)(args, training_args)
+        model_tokenizer = model.tokenizer
 
-    model_tokenizer = model.tokenizer
+    if training_args.use_lora and  training_args.do_train: # lora训练
+        # 进行peft的设置
+        lora_config = LoraConfig(
+        r=16,
+        target_modules=["q_proj", "v_proj"],
+        task_type=TaskType.CAUSAL_LM,
+        lora_alpha=32,
+        lora_dropout=0.05
+    )
+        lora_model = get_peft_model(model.pretrain_model, lora_config)  # 用peft对模型model.pretrain_model进行包装
+        lora_model.print_trainable_parameters()  # 打印模型的可训练参数
+        model = lora_model
+    elif training_args.use_lora and not training_args.do_train:  # lora评测
+        # config = PeftConfig.from_pretrained(training_args.load_weights_from)
+        # model = LlamaForCausalLM.from_pretrained(config.base_model_name_or_path)
+        # lora_model = PeftModel.from_pretrained(model, training_args.load_weights_from)
+        lora_model = AutoPeftModelForCausalLM.from_pretrained(training_args.load_weights_from, torch_dtype=torch.bfloat16)
+        model_tokenizer = LlamaTokenizer.from_pretrained(training_args.load_weights_from)
+        model = lora_model
+
+
+    
+    # # debug 加速
+    # model_tokenizer = LlamaTokenizer.from_pretrained(args.bert.location, use_fast=False)
+    # #  add padding token to tokenizer
+    # if model_tokenizer.pad_token is None:
+    #     model_tokenizer.pad_token = model_tokenizer.eos_token
 
 
     seq2seq_train_dataset, seq2seq_eval_dataset, seq2seq_test_dataset = None, None, None
@@ -145,20 +177,39 @@ def main() -> None:
 
     # We wrap the "string" seq2seq data into "tokenized tensor".
 
-    # import pdb; pdb.set_trace()
+
     train_dataset = TokenizedDataset(args, training_args, model_tokenizer,
                                      seq2seq_train_dataset) if seq2seq_train_dataset else None
-    args.dataset.is_eval = True
+    # import pdb; pdb.set_trace()
+    is_eval = True
+    # import pdb; pdb.set_trace()
     eval_dataset = TokenizedDataset(args, training_args, model_tokenizer,
-                                    seq2seq_eval_dataset) if seq2seq_eval_dataset else None
-    args.dataset.is_eval = False
+                                    seq2seq_eval_dataset, is_eval) if seq2seq_eval_dataset else None
+    # import pdb; pdb.set_trace()
+    # args.dataset.is_eval = False
     # test_dataset = TokenizedDataset(args, training_args, model_tokenizer,
     #                                 seq2seq_test_dataset) if seq2seq_test_dataset else None
     
     # import pdb; pdb.set_trace()
     
+    # # debug 
+    # ev_ids = eval_dataset[0]["input_ids"]
+    # tr_ids = train_dataset[0]["input_ids"]
+    # ev_texts = model_tokenizer.decode(ev_ids, skip_special_tokens=True)
+    # tr_texts = model_tokenizer.decode(tr_ids, skip_special_tokens=True)
+    # import pdb; pdb.set_trace()
+    # print(ev_texts)
+    # print('_________________________')
+    # print(tr_texts)
+
+    # import pdb; pdb.set_trace()
+
     # Initialize our Trainer
+    #暂时关闭early stopping，需要的时候放在callbacks中(列表里)
     early_stopping_callback = EarlyStoppingCallback(early_stopping_patience=args.seq2seq.patience if args.seq2seq.patience else 5)
+    # 运行cProfile
+    # profiler = cProfile.Profile()
+    # profiler.enable()
     trainer = EvaluateFriendlySeq2SeqTrainer(
         args=training_args,
         model=model,
@@ -173,9 +224,13 @@ def main() -> None:
         callbacks=[early_stopping_callback],
     )
     print('Trainer build successfully.')
-
+    # profiler.disable()
+    # stats = pstats.Stats(profiler).sort_stats('cumtime')
+    # stats.print_stats()
+    # stats.dump_stats('output/profile.stats')
+    # exit()
     # Load model weights (for --do_train=False or post finetuning).
-    if training_args.load_weights_from:
+    if training_args.load_weights_from and not training_args.use_lora: # 非lora下，加载模型权重
         state_dict = torch.load(os.path.join(training_args.load_weights_from, transformers.WEIGHTS_NAME), map_location="cpu")
         trainer.model.load_state_dict(state_dict, strict=True)
         # release memory

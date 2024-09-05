@@ -7,13 +7,14 @@ import pdb
 
 class TokenizedDataset(Dataset):
     # TODO: A unified structure-representation.
-    def __init__(self, args, training_args, tokenizer, seq2seq_dataset, ):
+    def __init__(self, args, training_args, tokenizer, seq2seq_dataset, is_eval=False):
         self.args = args
         self.training_args = training_args
         self.tokenizer = tokenizer
         if args.seq2seq.model_type == 'DecoderOnly':
             self.tokenizer.padding_side = "left"
         self.seq2seq_dataset = seq2seq_dataset
+        self.is_eval = is_eval
 
         self.conv_sep = " || "
 
@@ -74,7 +75,7 @@ class TokenizedDataset(Dataset):
         if self.args.model.use_description and self.args.model.concatenate_description:
             seq_in = "{} ; {}".format(raw_item["description"], seq_in)
 
-        if self.args.seq2seq.model_type == 'DecoderOnly' and not self.args.dataset.is_eval:
+        if self.args.seq2seq.model_type == 'DecoderOnly' and not self.is_eval:
              # find the length of seq_in(without the seq_out)
             prompt_in_tokenized = self.tokenizer(
                 seq_in,
@@ -90,6 +91,8 @@ class TokenizedDataset(Dataset):
             # 需要将seq_in和seq_out进行拼接
             seq_in = "{} {}".format(seq_in, raw_item["query"])
 
+        # elif self.args.seq2seq.model_type == 'DecoderOnly' and self.is_eval: # 评测时的输入和输出有所改变
+        #     eval_input = 
 
 
         tokenized_question_and_schemas = self.tokenizer(
@@ -114,19 +117,37 @@ class TokenizedDataset(Dataset):
             tokenized_inferred_input_ids = torch.LongTensor(tokenized_inferred.data["input_ids"])
             # Here -100 will let the model not to compute the loss of the padding tokens.
             tokenized_inferred_input_ids[tokenized_inferred_input_ids == self.tokenizer.pad_token_id] = -100
-
-        if self.args.seq2seq.model_type == 'DecoderOnly' and not self.args.dataset.is_eval:
+        
+        if self.args.seq2seq.model_type == 'DecoderOnly' and not self.is_eval:  #decoder only 的训练时的设置
             tokenized_inferred_input_ids = tokenized_question_and_schemas.data["input_ids"].copy()  # 不加copy会改变原来的值
+            tmp = [i for i, x in enumerate(tokenized_inferred_input_ids) if x == 2]
+            last_index = max(tmp) if tmp else -1  #  找到最后一个pad的位置，这里的2是llama的eos token，作为pad token；这里的pad token是在左边的
 
+            
+            
 
             # 需要对label的输入部分进行mask
             for i in range(len(prompt_in_tokenized)):
-                tokenized_inferred_input_ids[i] = -100   
+                try:
+                    tokenized_inferred_input_ids[i+last_index+1] = -100     # last_index+1是因为要跳过pad token
+                except IndexError:
+                    print(f"IndexError: i={i}, last_index={last_index}, len(tokenized_inferred_input_ids)={len(tokenized_inferred_input_ids)}")
+                    print(f"prompt_in_tokenized: {prompt_in_tokenized}")
+                    print(f"tokenized_inferred_input_ids: {tokenized_inferred_input_ids}")
+                    print(f"seq_in: {seq_in}")
+                    print(f"raw_item['query']: {raw_item['query']}")
+                    print(f"raw_item['seq_out']: {raw_item['seq_out']}")
+                    raise IndexError
             if len(prompt_in_tokenized) > len(tokenized_question_and_schemas.data['input_ids']):
                 raise ValueError(
                     f"Prompt is longer than the input, something went wrong. Prompt: {prompt_in_tokenized}, input:"
                     f" {tokenized_question_and_schemas.data['input_ids']}"
                 )
+            
+            tokenized_inferred_input_ids = torch.LongTensor(tokenized_inferred_input_ids)
+
+        elif self.args.seq2seq.model_type == 'DecoderOnly' and self.is_eval:  #decoder only 的评测时的设置，和encoder-decoder的评测时的设置一样
+            tokenized_inferred_input_ids = torch.LongTensor(tokenized_inferred.data["input_ids"])
 
         item = {
             'input_ids': torch.LongTensor(tokenized_question_and_schemas.data["input_ids"]),
@@ -157,7 +178,6 @@ class TokenizedDataset(Dataset):
             item['knowledge_input_ids'] = torch.LongTensor(tokenized_knowledge.data["input_ids"])
             item['knowledge_attention_mask'] = torch.LongTensor(tokenized_knowledge.data["attention_mask"])
         
-
         return item
 
     def __len__(self):

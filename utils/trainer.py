@@ -1,6 +1,7 @@
 import collections
 import json
 import time
+from turtle import left
 from typing import Any, Dict, List, Optional, Tuple, Union
 from typing import NamedTuple
 from unittest import result
@@ -162,7 +163,7 @@ class EvaluateFriendlySeq2SeqTrainer(transformers.trainer_seq2seq.Seq2SeqTrainer
             self.compute_metrics = compute_metrics
 
         if eval_examples is not None and eval_dataset is not None and self.compute_metrics is not None:
-            # import pdb; pdb.set_trace()
+            import pdb; pdb.set_trace()
             eval_preds = self._post_process_function(
                 eval_examples,
                 output.predictions,
@@ -201,6 +202,7 @@ class EvaluateFriendlySeq2SeqTrainer(transformers.trainer_seq2seq.Seq2SeqTrainer
         self._num_beams = num_beams if num_beams is not None else self.args.generation_num_beams
         self._max_time = max_time
 
+        # import pdb; pdb.set_trace()
         # memory metrics - must set up as early as possible
         self._memory_tracker.start()
 
@@ -220,6 +222,8 @@ class EvaluateFriendlySeq2SeqTrainer(transformers.trainer_seq2seq.Seq2SeqTrainer
         finally:
             self.compute_metrics = compute_metrics
 
+
+        import pdb; pdb.set_trace()
         if self.compute_metrics is not None:
 
             eval_preds = self._post_process_function(
@@ -309,17 +313,26 @@ class EvaluateFriendlySeq2SeqTrainer(transformers.trainer_seq2seq.Seq2SeqTrainer
             attention_mask=inputs["attention_mask"],
             **gen_kwargs,
         )
+
         # in case the batch is shorter than max length, the output should be padded
 
-        if generated_tokens.shape[-1] < gen_kwargs["max_new_tokens"] and not self.args.is_decoder_only:  # encoder-decoder下的设置
-            generated_tokens = self._pad_tensors_to_max_len(generated_tokens, gen_kwargs["max_length"])
+        if generated_tokens.shape[-1] >= gen_kwargs["max_new_tokens"]and not self.args.is_decoder_only: #encoder-decoder下会有129的情况，确保长度不超过max_new_tokens
+            generated_tokens = generated_tokens[:, : gen_kwargs["max_new_tokens"]]
+        if generated_tokens.shape[-1] < gen_kwargs["max_new_tokens"] and not self.args.is_decoder_only:  # encoder-decoder下，长度未满max_new_tokens的情况
+            generated_tokens = self._pad_tensors_to_max_len(generated_tokens, gen_kwargs["max_new_tokens"])
 
         # generated_tokens去除input_ids的部分（主要是Decoder only）
         if self.args.is_decoder_only:
+
             generated_tokens = generated_tokens[:, inputs["input_ids"].shape[-1]:]
+            generated_tokens = self._pad_tensors_to_max_len(generated_tokens, gen_kwargs["max_new_tokens"])
+            # Decoder-only的模型不需要计算loss
+            now_labels = inputs["labels"]
+            inputs["labels"] = None
+            has_labels = False
 
         with torch.no_grad():
-            # if self.use_cuda_amp:
+            # if self.use_cuda_amp:# 新版本不支持
             #     with autocast():
             #         outputs = model(**inputs)
             # else:
@@ -335,9 +348,11 @@ class EvaluateFriendlySeq2SeqTrainer(transformers.trainer_seq2seq.Seq2SeqTrainer
         if self.args.prediction_loss_only:
             return (loss, None, None)
 
+
         labels = inputs["labels"]
-        if labels.shape[-1] < gen_kwargs["max_new_tokens"]:
-            labels = self._pad_tensors_to_max_len(labels, gen_kwargs["max_new_tokens"])
+        if has_labels:
+            if labels.shape[-1] < gen_kwargs["max_new_tokens"]:
+                labels = self._pad_tensors_to_max_len(labels, gen_kwargs["max_new_tokens"])
 
         return (loss, generated_tokens, labels)
 
@@ -350,12 +365,13 @@ class EvaluateFriendlySeq2SeqTrainer(transformers.trainer_seq2seq.Seq2SeqTrainer
         # 避免batch_decode的时候出现问题，逐个decode
         results = []
         bs = predictions.shape[0]
-        # import pdb; pdb.set_trace()
         for i in range(bs):
             try:
                 results.append(self.tokenizer.decode(predictions[i], skip_special_tokens=True))
             except Exception as e:
+                import pdb; pdb.set_trace()
                 print(f"Error in decoding prediction {i}: {e}")
+                print(f"Prediction: {predictions[i]}")
                 results.append("error")
 
         # Save locally.
@@ -380,3 +396,26 @@ class EvaluateFriendlySeq2SeqTrainer(transformers.trainer_seq2seq.Seq2SeqTrainer
     def _compute_metrics(self, eval_prediction: EvalPrediction, section) -> dict:
         # bird/finetuning/metrics/meta_tuning/evaluator.py
         return self.evaluator.evaluate(eval_prediction.predictions, eval_prediction.items, section)
+    
+    def _pad_tensors_to_max_len(self, tensor, max_length):
+        if self.tokenizer is not None and hasattr(self.tokenizer, "pad_token_id"):
+            # If PAD token is not defined at least EOS token has to be defined
+            pad_token_id = (
+                self.tokenizer.pad_token_id if self.tokenizer.pad_token_id is not None else self.tokenizer.eos_token_id
+            )
+        else:
+            if self.model.config.pad_token_id is not None:
+                pad_token_id = self.model.config.pad_token_id
+            else:
+                raise ValueError("Pad_token_id must be set in the configuration of the model, in order to pad tensors")
+
+        padded_tensor = pad_token_id * torch.ones(
+            (tensor.shape[0], max_length), dtype=tensor.dtype, device=tensor.device
+        )
+        if self.args.is_decoder_only: # decoder only的模型需要left padding
+            pad_len = max_length - tensor.shape[-1]
+            padded_tensor[:, pad_len: ] = tensor
+        else:
+            padded_tensor[:, : tensor.shape[-1]] = tensor
+        return padded_tensor
+
