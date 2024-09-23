@@ -5,7 +5,7 @@ from torch.utils.data import Dataset
 import pdb
 
 
-class TokenizedDataset(Dataset):
+class  TokenizedDataset(Dataset):
     # TODO: A unified structure-representation.
     def __init__(self, args, training_args, tokenizer, seq2seq_dataset, is_eval=False):
         self.args = args
@@ -90,9 +90,9 @@ class TokenizedDataset(Dataset):
 
             # 需要将seq_in和seq_out进行拼接
             seq_in = "{} {}".format(seq_in, raw_item["query"])
-
-        # elif self.args.seq2seq.model_type == 'DecoderOnly' and self.is_eval: # 评测时的输入和输出有所改变
-        #     eval_input = 
+        elif self.args.seq2seq.model_type == 'DecoderOnly' and self.is_eval: # 评测时，对于大模型，在最后加上prompt
+            prompt = "Please generate the query language for SQlite to get the result of the QUESTION."
+            seq_in = "{} {}".format(seq_in, prompt)
 
 
         tokenized_question_and_schemas = self.tokenizer(
@@ -120,8 +120,8 @@ class TokenizedDataset(Dataset):
         
         if self.args.seq2seq.model_type == 'DecoderOnly' and not self.is_eval:  #decoder only 的训练时的设置
             tokenized_inferred_input_ids = tokenized_question_and_schemas.data["input_ids"].copy()  # 不加copy会改变原来的值
-            tmp = [i for i, x in enumerate(tokenized_inferred_input_ids) if x == 2]
-            last_index = max(tmp) if tmp else -1  #  找到最后一个pad的位置，这里的2是llama的eos token，作为pad token；这里的pad token是在左边的
+            tmp = [i for i, x in enumerate(tokenized_inferred_input_ids) if x == self.tokenizer.pad_token_id]
+            last_index = max(tmp) if tmp else -1  #  找到最后一个pad的位置，作为pad token；这里的pad token是在左边的，定位后进行-100的mask
 
             
             

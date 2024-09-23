@@ -108,6 +108,7 @@ def main() -> None:
         os.makedirs(cache_root, exist_ok=True)
         meta_tuning_data = {}
         for task, arg_path in args.arg_paths:
+            # 这里的arg_paths是大的config传入的，默认是META_TUNING/bird.cfg
             task_args = Configure.Get(arg_path)
             task_args.bert = args.bert
             print('task_args.bert.location:', task_args.bert.location)
@@ -119,16 +120,17 @@ def main() -> None:
                 cache_dir=task_args.dataset.data_store_path,
                 trust_remote_code=True)
             
-            # debug 对eval_dataset进行切分
-            # tmp = task_raw_datasets_split['validation'][:10]
+            # # debug 对eval_dataset进行切分
+            # tmp = task_raw_datasets_split['validation'][:20]
             # task_raw_datasets_split['validation'] = datasets.Dataset.from_dict(tmp)
 
-            # task_args.seq2seq.constructor是seq2seq_construction.bird
+            # task_args.seq2seq.constructor是seq2seq_construction.bird；主要是添加SchemaLinking的数据
             task_seq2seq_dataset_split: tuple = utils.tool.get_constructor(task_args.seq2seq.constructor)(task_args).\
                 to_seq2seq(task_raw_datasets_split, cache_root)
 
             meta_tuning_data[arg_path] = task_seq2seq_dataset_split
 
+        # bird/finetuning/seq2seq_construction/meta_tuning.py  # 貌似是做上采样的，暂时不动
         seq2seq_dataset_split: tuple = utils.tool.get_constructor(args.seq2seq.constructor)(args).\
             to_seq2seq(meta_tuning_data)
 
@@ -174,10 +176,12 @@ def main() -> None:
         seq2seq_train_dataset, seq2seq_eval_dataset, seq2seq_test_dataset = seq2seq_dataset_split
     else:
         raise ValueError("Other split not support yet.")
+    
 
     # We wrap the "string" seq2seq data into "tokenized tensor".
 
 
+    # 将seq2seq数据集转换为tokenized数据集
     train_dataset = TokenizedDataset(args, training_args, model_tokenizer,
                                      seq2seq_train_dataset) if seq2seq_train_dataset else None
     # import pdb; pdb.set_trace()
@@ -185,6 +189,7 @@ def main() -> None:
     # import pdb; pdb.set_trace()
     eval_dataset = TokenizedDataset(args, training_args, model_tokenizer,
                                     seq2seq_eval_dataset, is_eval) if seq2seq_eval_dataset else None
+
     # import pdb; pdb.set_trace()
     # args.dataset.is_eval = False
     # test_dataset = TokenizedDataset(args, training_args, model_tokenizer,

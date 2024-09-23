@@ -1,3 +1,7 @@
+"""
+解析SQL语句，提取列和表信息，并保存到json文件中（全部为小写）
+"""
+
 import sqlglot
 from sqlglot import exp
 import json
@@ -22,9 +26,9 @@ def sql_parser(all_data):
             for ast in parsed:
                 if ast is not None:
                     for node in ast.find_all(exp.Column):
-                        columns.append(node.name)
+                        columns.append(node.name.lower())
                     for node in ast.find_all(exp.Table):
-                        tables.append(node.name)
+                        tables.append(node.name.lower())
                     # 对columns和tables去重
                     columns = list(set(columns))
                     tables = list(set(tables))
@@ -38,10 +42,10 @@ def sql_parser(all_data):
     return res
 
 if __name__ == '__main__':
-    json_path = '/opt/data/private/wtc_beifen/bird/data/train/train.json'
+    json_path = '/opt/data/private/wtc_beifen/bird/data/dev.json'
     all_data = read_sqls_from_json(json_path)
     res = sql_parser(all_data)
-    with open('/opt/data/private/wtc_beifen/bird/data/train/train_with_columns_tables.json', 'w') as f:
+    with open('/opt/data/private/wtc_beifen/bird/data/dev_with_columns_tables.json', 'w') as f:
         json.dump(res, f, indent=4)
 
 # # 输入SQL语句

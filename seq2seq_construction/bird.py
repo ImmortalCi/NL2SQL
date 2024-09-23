@@ -1,4 +1,5 @@
 import os
+import struct
 import torch
 import random
 import re
@@ -49,7 +50,7 @@ def bird_get_target(
     return f"{db_id} | {_normalize(query)}" if target_with_db_id else _normalize(query)
 
 
-def bird_add_serialized_schema(ex: dict, args) -> dict:
+def bird_add_serialized_schema(ex: dict, args) -> dict:  # 添加序列化的schema
     if getattr(args.seq2seq, "schema_serialization_with_nl"):
         serialized_schema = serialize_schema_natural_language(
             question=ex["question"],
@@ -59,6 +60,21 @@ def bird_add_serialized_schema(ex: dict, args) -> dict:
             db_table_names=ex["db_table_names"],
             db_primary_keys=ex["db_primary_keys"],
             db_foreign_keys=ex["db_foreign_keys"],
+            schema_serialization_with_db_content=args.seq2seq.schema_serialization_with_db_content,
+            normalize_query=True,
+        )
+    elif getattr(args.seq2seq, "schema_serialization_customized"):
+        serialized_schema = customized_serialize_schema(ex, args)
+        if serialized_schema == "":
+            serialized_schema = serialize_schema(
+            question=ex["question"],
+            db_path=ex["db_path"],
+            db_id=ex["db_id"],
+            db_column_names=ex["db_column_names"],
+            db_table_names=ex["db_table_names"],
+            schema_serialization_type="peteshaw",
+            schema_serialization_randomized=False,
+            schema_serialization_with_db_id=True,
             schema_serialization_with_db_content=args.seq2seq.schema_serialization_with_db_content,
             normalize_query=True,
         )
@@ -103,7 +119,7 @@ def bird_pre_process_function(batch: dict, args):
     return zip(inputs, targets)
 
 
-def bird_pre_process_one_function(item: dict, args):
+def bird_pre_process_one_function(item: dict, args):  # 读取一个样本的问题和SQL输出
     prefix = ""
 
     seq_out = bird_get_target(
@@ -285,7 +301,26 @@ def serialize_schema(
         serialized_schema = table_sep.join(tables)
     return serialized_schema
 
+def customized_serialize_schema(ex, args):
+    question = ex["question"]
+    db_id = ex["db_id"]
+    gold_labels = ex["gold_label"]
+    if len(gold_labels) == 0:
+        return ""
+    else:
+        struct_in = ""
+        for gold_label in gold_labels:
+            # 定位到第一个|的位置
+            idx = gold_label.find("|")
+            # 定位到最后一个|的位置
+            idx_end = gold_label.rfind("|")
+            description = gold_label[idx + 1:]  # 如果idx_end被传入，那么不取description
+            struct_in += description + "; "
+        return struct_in
 
+    
+
+        
 def _get_schemas(examples: Dataset) -> Dict[str, dict]:
     schemas: Dict[str, dict] = dict()
     for ex in examples:
@@ -352,7 +387,7 @@ class TrainDataset(Dataset):
             self.extended_data = []
             for raw_data in tqdm(self.raw_datasets):
                 extend_data = deepcopy(raw_data)
-                extend_data.update(bird_add_serialized_schema(extend_data, args))
+                extend_data.update(bird_add_serialized_schema(extend_data, args))  # 添加序列化的schema dict，key为serialized_schema
 
                 question, seq_out = bird_pre_process_one_function(extend_data, args=self.args)
                 extend_data.update({"struct_in": extend_data["serialized_schema"].strip(),

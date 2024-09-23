@@ -163,7 +163,6 @@ class EvaluateFriendlySeq2SeqTrainer(transformers.trainer_seq2seq.Seq2SeqTrainer
             self.compute_metrics = compute_metrics
 
         if eval_examples is not None and eval_dataset is not None and self.compute_metrics is not None:
-            import pdb; pdb.set_trace()
             eval_preds = self._post_process_function(
                 eval_examples,
                 output.predictions,
@@ -223,7 +222,6 @@ class EvaluateFriendlySeq2SeqTrainer(transformers.trainer_seq2seq.Seq2SeqTrainer
             self.compute_metrics = compute_metrics
 
 
-        import pdb; pdb.set_trace()
         if self.compute_metrics is not None:
 
             eval_preds = self._post_process_function(
@@ -305,8 +303,6 @@ class EvaluateFriendlySeq2SeqTrainer(transformers.trainer_seq2seq.Seq2SeqTrainer
             gen_kwargs["task_ids"] = inputs["task_ids"]
         if "graph_idx" in inputs:
             gen_kwargs["graph_idx"] = inputs["graph_idx"]
-
-        # import pdb;pdb.set_trace()
         
         generated_tokens = self.model.generate(
             inputs["input_ids"],
@@ -369,7 +365,6 @@ class EvaluateFriendlySeq2SeqTrainer(transformers.trainer_seq2seq.Seq2SeqTrainer
             try:
                 results.append(self.tokenizer.decode(predictions[i], skip_special_tokens=True))
             except Exception as e:
-                import pdb; pdb.set_trace()
                 print(f"Error in decoding prediction {i}: {e}")
                 print(f"Prediction: {predictions[i]}")
                 results.append("error")

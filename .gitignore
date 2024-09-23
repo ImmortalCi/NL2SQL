@@ -1,1 +1,6 @@
 wandb/
+utils/__pycache__/
+my_script/__pycache__/
+metrics/bird/__pycache__/
+models/unified/__pycache__/
+output/

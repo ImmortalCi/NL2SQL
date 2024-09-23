@@ -58,6 +58,8 @@ class BIRD(datasets.GeneratorBasedBuilder):
                         "other_column_id": datasets.Value("int32"),
                     }
                 ),
+                "gold_label": datasets.features.Sequence(datasets.Value("string")),
+                
             }
         )
         return datasets.DatasetInfo(
@@ -77,14 +79,14 @@ class BIRD(datasets.GeneratorBasedBuilder):
             datasets.SplitGenerator(
                 name=datasets.Split.TRAIN,
                 gen_kwargs={
-                    "data_filepath": downloaded_filepath + "/train/train.json",
+                    "data_filepath": downloaded_filepath + "/train/train_gold_label.json",
                     "db_path": downloaded_filepath + "/train/train_databases",
                 },
             ),
             datasets.SplitGenerator(
                 name=datasets.Split.VALIDATION,
                 gen_kwargs={
-                    "data_filepath": downloaded_filepath + "/dev.json",
+                    "data_filepath": downloaded_filepath + "/dev_gold_label.json",
                     "db_path": downloaded_filepath + "/dev_databases/",
                 },
             ),
@@ -119,4 +121,5 @@ class BIRD(datasets.GeneratorBasedBuilder):
                         {"column_id": column_id, "other_column_id": other_column_id}
                         for column_id, other_column_id in schema["foreign_keys"]
                     ],
+                    "gold_label": sample["gold_label"],
                 }

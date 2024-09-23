@@ -8,7 +8,7 @@ import copy
 
 def merge_description(description_path):
     """
-    合并描述信息
+    合并描述信息，并且全部转化为小写，并去除空格等。
 
     参数:
     description_path (str): 描述信息文件的路径，由get_description脚本生成的字典。
@@ -29,7 +29,7 @@ def merge_description(description_path):
                 columns = db[table_name]
                 for column_name in columns.keys():
                     column_description = columns[column_name]
-                    prompt = db_name + '|' + table_name + '|' + column_name + '|' + column_description
+                    prompt = db_name.strip().lower() + '|' + table_name.strip().lower() + '|' + column_name.strip().lower() + '|' + column_description.strip().lower()
                     res[db_name].append(prompt)
     return res
 
@@ -106,7 +106,46 @@ def get_triplet_bm25(all_descriptions, metadata_path, save_path):
     with open(save_path, 'w') as f:
         json.dump(all_triplets_list, f, indent=4)
 
+def get_gold_label(all_descriptions, metadata_path, save_path):
+    """
+    从元数据中获取gold label并保存到文件中。
+
+    参数：
+    all_descriptions (dict): 包含数据库描述的字典，键为数据库名称，值为描述。
+    metadata_path (str): 元数据文件的路径，由SQL_parser脚本生成的每个SQL查询用到的列和表。
+    save_path (str): 保存gold label的文件路径。
+
+    返回：
+    无返回值。
+
+    Raises:
+    无异常抛出。
+
+    """
+    with open(metadata_path, 'r') as f:
+        res = []
+        data = json.load(f)
+        for sql_metadata in tqdm(data):
+            db_name = sql_metadata['db_id']
+            columns = sql_metadata['columns']
+            tables = sql_metadata['tables']
+            all_columns = copy.deepcopy(all_descriptions[db_name])
+            joins = []
+            # 遍历所有可能的column、table组合
+            for col in columns:
+                for tab in tables:
+                    joins.append('|' + tab + '|' + col + '|')
+            gold_label = []
+            for j in joins:
+                for col in all_columns:
+                    if j in col:
+                        gold_label.append(col)
+            sql_metadata['gold_label'] = gold_label
+            res.append(sql_metadata)
+
+    with open(save_path, 'w') as f:
+        json.dump(res, f, indent=4)
 
 if __name__ == '__main__':
-    # test = merge_description('/opt/data/private/wtc_beifen/bird/data/description/train_all_databases.json')
-    # get_triplet_bm25(test, '/opt/data/private/wtc_beifen/bird/data/train/train_with_columns_tables.json', '/opt/data/private/wtc_beifen/bird/data/train/train_triplets.json')
+    test = merge_description('/opt/data/private/wtc_beifen/bird/data/description/dev_all_descriptions.json')
+    get_gold_label(test, '/opt/data/private/wtc_beifen/bird/data/dev_with_columns_tables.json', '/opt/data/private/wtc_beifen/bird/data/dev_gold_label.json')
